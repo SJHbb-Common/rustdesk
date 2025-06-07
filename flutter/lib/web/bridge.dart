@@ -50,7 +50,7 @@ class EventToUI_Texture implements EventToUI {
   bool get field1 => f1;
 }
 
-class RustdeskImpl {
+class IpmrmtImpl {
   Future<void> stopGlobalEventStream({required String appType, dynamic hint}) {
     throw UnimplementedError("stopGlobalEventStream");
   }
@@ -810,7 +810,7 @@ class RustdeskImpl {
   }
 
   String mainGetAppNameSync({dynamic hint}) {
-    return 'RustDesk';
+    return 'IPMRmt';
   }
 
   String mainUriPrefixSync({dynamic hint}) {
@@ -1597,7 +1597,7 @@ class RustdeskImpl {
   }
 
   bool isCustomClient({dynamic hint}) {
-    return false;
+    return true; // (JEM)
   }
 
   bool isDisableSettings({dynamic hint}) {
@@ -1613,11 +1613,11 @@ class RustdeskImpl {
   }
 
   bool isDisableAccount({dynamic hint}) {
-    return false;
+    return true; // (JEM)
   }
 
   bool isDisableInstallation({dynamic hint}) {
-    return false;
+    return true; // (JEM)
   }
 
   Future<bool> isPresetPassword({dynamic hint}) {
