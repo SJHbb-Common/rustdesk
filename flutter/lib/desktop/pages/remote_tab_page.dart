@@ -146,32 +146,9 @@ class _ConnectionTabPageState extends State<ConnectionTabPage> {
                 connectionType.secure.value == ConnectionType.strSecure;
             bool direct =
                 connectionType.direct.value == ConnectionType.strDirect;
-            String msgConn;
-            if (secure && direct) {
-              msgConn = translate("Direct and encrypted connection");
-            } else if (secure && !direct) {
-              msgConn = translate("Relayed and encrypted connection");
-            } else if (!secure && direct) {
-              msgConn = translate("Direct and unencrypted connection");
-            } else {
-              msgConn = translate("Relayed and unencrypted connection");
-            }
-
-            final remotePage = tabController.state.value.tabs  // (JEM)
-              .firstWhere((tab) => tab.key == key)
-              .page as RemotePage;
-            final ffi = remotePage.ffi;
-            final pi = ffi.ffiModel.pi;
-			
-            String infSes = "${pi.username}@${pi.hostname}";   // (JEM)
-            if (infSes == "@") {
-              infSes = "";
-            } else {
-             infSes = "Sessão: ${infSes}\n";
-            }
-												
-            var msgFingerprint = "${infSes}${translate('Fingerprint')}:\n";  // (JEM)
-
+            String msgConn = getConnectionText(
+                secure, direct, connectionType.stream_type.value);
+            var msgFingerprint = '${translate('Fingerprint')}:\n';
             var fingerprint = FingerprintState.find(key).value;
             if (fingerprint.isEmpty) {
               fingerprint = 'N/A';

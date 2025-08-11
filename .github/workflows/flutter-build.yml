@@ -43,10 +43,6 @@ env:
   #signing keys env variable checks
   ANDROID_SIGNING_KEY: "${{ secrets.ANDROID_SIGNING_KEY }}"
   MACOS_P12_BASE64: "${{ secrets.MACOS_P12_BASE64 }}"
-  # To make a custom build with your own servers set the below secret values
-  RS_PUB_KEY: "${{ secrets.RS_PUB_KEY }}"
-  RENDEZVOUS_SERVER: "${{ secrets.RENDEZVOUS_SERVER }}"
-  API_SERVER: "${{ secrets.API_SERVER }}"
   UPLOAD_ARTIFACT: "${{ inputs.upload-artifact }}"
   SIGN_BASE_URL: "${{ secrets.SIGN_BASE_URL }}"
 
@@ -169,8 +165,6 @@ jobs:
       - name: Build rustdesk
         run: |
           # Windows: build RustDesk
-          Push-Location flutter ; flutter clean ; flutter pub get ; Pop-Location
-          python3 .\.github\workflows\chngwnd.py
           python3 .\build.py --portable --hwcodec --flutter --vram --skip-portable-pack
           mv ./flutter/build/windows/x64/runner/Release ./rustdesk
 
@@ -252,7 +246,7 @@ jobs:
           sed -i '/dpiAware/d' res/manifest.xml
           pushd ./libs/portable
           pip3 install -r requirements.txt
-          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/ipmrmt.exe
+          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
           popd
           mkdir -p ./SignOutput
           mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.exe
@@ -370,7 +364,7 @@ jobs:
           sed -i 's/branch = "dyn"/branch = "dyn_x86"/g' ./Cargo.toml
           cargo build --features inline,vram,hwcodec --release --bins
           mkdir -p ./Release
-          mv ./target/release/ipmrmt.exe ./Release/ipmrmt.exe
+          mv ./target/release/rustdesk.exe ./Release/rustdesk.exe
           curl -LJ -o ./Release/sciter.dll https://github.com/c-smile/sciter-sdk/raw/master/bin.win/x32/sciter.dll
           echo "output_folder=./Release" >> $GITHUB_OUTPUT
           curl -LJ -o ./usbmmidd_v2.zip https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip
@@ -410,10 +404,10 @@ jobs:
           sed -i '/dpiAware/d' res/manifest.xml
           pushd ./libs/portable
           pip3 install -r requirements.txt
-          python3 ./generate.py -f ../../Release/ -o . -e ../../Release/ipmrmt.exe
+          python3 ./generate.py -f ../../Release/ -o . -e ../../Release/rustdesk.exe
           popd
           mkdir -p ./SignOutput
-          mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/ipmrmt-${{ env.VERSION }}-${{ matrix.job.arch }}-sciter.exe
+          mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}-sciter.exe
 
       - name: Sign rustdesk self-extracted file
         if: env.UPLOAD_ARTIFACT == 'true' && env.SIGN_BASE_URL != ''
@@ -428,81 +422,7 @@ jobs:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
-            ./SignOutput/ipmrmt-*.exe
-
-  build-for-macOS-arm64-selfhost:
-    # use build-for-macOS instead
-    if: false
-    runs-on: [self-hosted, macOS, ARM64]
-    needs: [generate-bridge]
-    steps:
-      - name: Export GitHub Actions cache environment variables
-        uses: actions/github-script@v6
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-
-      - name: Checkout source code
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Restore bridge files
-        uses: actions/download-artifact@master
-        with:
-          name: bridge-artifact
-          path: ./
-
-      - name: Build rustdesk
-        run: |
-          ./build.py --flutter --hwcodec --unix-file-copy-paste
-
-      - name: create unsigned dmg
-        if: env.UPLOAD_ARTIFACT == 'true'
-        run: |
-          CREATE_DMG="$(command -v create-dmg)"
-          CREATE_DMG="$(readlink -f "$CREATE_DMG")"
-          sed -i -e 's/MAXIMUM_UNMOUNTING_ATTEMPTS=3/MAXIMUM_UNMOUNTING_ATTEMPTS=7/' "$CREATE_DMG"
-          create-dmg --icon "IPMRmt.app" 200 190 --hide-extension "IPMRmt.app" --window-size 800 400 --app-drop-link 600 185 ipmrmt-${{ env.VERSION }}-arm64.dmg ./flutter/build/macos/Build/Products/Release/IPMRmt.app
-
-      - name: Upload unsigned macOS app
-        if: env.UPLOAD_ARTIFACT == 'true'
-        uses: actions/upload-artifact@master
-        with:
-          name: ipmrmt-unsigned-macos-arm64
-          path: ipmrmt-${{ env.VERSION }}-arm64.dmg # can not upload the directory directly or tar.gz file, which destroy the link structure, causing the codesign failed
-
-      - name: Codesign app and create signed dmg
-        if: env.MACOS_P12_BASE64 != null && env.UPLOAD_ARTIFACT == 'true'
-        run: |
-          # Patch create-dmg to give more attempts to unmount image
-          CREATE_DMG="$(command -v create-dmg)"
-          CREATE_DMG="$(readlink -f "$CREATE_DMG")"
-          sed -i -e 's/MAXIMUM_UNMOUNTING_ATTEMPTS=3/MAXIMUM_UNMOUNTING_ATTEMPTS=7/' "$CREATE_DMG"
-          # start sign the ipmrmt.app and dmg
-          rm -rf *.dmg || true
-          codesign --force --options runtime -s ${{ secrets.MACOS_CODESIGN_IDENTITY }} --deep --strict ./flutter/build/macos/Build/Products/Release/IPMRmt.app -vvv
-          create-dmg --icon "IPMRmt.app" 200 190 --hide-extension "IPMRmt.app" --window-size 800 400 --app-drop-link 600 185 ipmrmt-${{ env.VERSION }}.dmg ./flutter/build/macos/Build/Products/Release/IPMRmt.app
-          codesign --force --options runtime -s ${{ secrets.MACOS_CODESIGN_IDENTITY }} --deep --strict ipmrmt-${{ env.VERSION }}.dmg -vvv
-          # notarize the ipmrmt-${{ env.VERSION }}.dmg
-          rcodesign notary-submit --api-key-path ~/.p12/api-key.json  --staple ipmrmt-${{ env.VERSION }}.dmg
-
-      - name: Rename rustdesk
-        if: env.UPLOAD_ARTIFACT == 'true'
-        run: |
-          for name in ipmrmt*??.dmg; do
-              mv "$name" "${name%%.dmg}-aarch64.dmg"
-          done
-
-      - name: Publish DMG package
-        if: env.UPLOAD_ARTIFACT == 'true'
-        uses: softprops/action-gh-release@v1
-        with:
-          prerelease: true
-          tag_name: ${{ env.TAG_NAME }}
-          files: |
-            ipmrmt*-aarch64.dmg
+            ./SignOutput/rustdesk-*.exe
 
   build-rustdesk-ios:
     if: ${{ inputs.upload-artifact }}
@@ -623,63 +543,6 @@ jobs:
       #     files: |
       #       flutter/build/ios/ipa/*.ipa
 
-  build-rustdesk-ios-selfhost:
-    #if: ${{ inputs.upload-artifact }}
-    if: false
-    runs-on: [self-hosted, macOS, ARM64]
-    needs: [generate-bridge]
-    strategy:
-      fail-fast: false
-    steps:
-      - name: Export GitHub Actions cache environment variables
-        uses: actions/github-script@v6
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-
-      - name: Checkout source code
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      # $VCPKG_ROOT/vcpkg install --triplet arm64-ios --x-install-root="$VCPKG_ROOT/installed"
-
-      - name: Restore bridge files
-        uses: actions/download-artifact@master
-        with:
-          name: bridge-artifact
-          path: ./
-
-      - name: Build rustdesk lib
-        run: |
-          cargo build --features flutter,hwcodec --release --target aarch64-apple-ios --lib
-
-      - name: Build rustdesk
-        # ios sdk not installed on this machine, I will install it later after I am back home
-        if: false
-        shell: bash
-        run: |
-          pushd flutter
-          # flutter build ipa --release --obfuscate --split-debug-info=./split-debug-info --no-codesign
-          # for easy debugging
-          flutter build ipa --release --no-codesign
-
-      # - name: Upload Artifacts
-      #   # if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
-      #   uses: actions/upload-artifact@master
-      #   with:
-      #     name: rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.apk
-      #     path: flutter/build/ios/ipa/*.ipa
-
-      # - name: Publish ipa package
-      #   # if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
-      #   uses: softprops/action-gh-release@v1
-      #   with:
-      #     prerelease: true
-      #     tag_name: ${{ env.TAG_NAME }}
-      #     files: |
-      #       flutter/build/ios/ipa/*.ipa
 
   build-for-macOS:
     name: ${{ matrix.job.target }}
@@ -698,7 +561,7 @@ jobs:
             }
           - {
               target: aarch64-apple-darwin,
-              os: macos-latest,
+              os: macos-14,
               # extra-build-args: "--disable-flutter-texture-render", # disable this for mac, because we see a lot of users reporting flickering both on arm and x64, and we can not confirm if texture rendering has better performance if htere is no vram, https://github.com/rustdesk/rustdesk/issues/6296
               extra-build-args: "--screencapturekit",
               arch: aarch64,
@@ -845,14 +708,14 @@ jobs:
           CREATE_DMG="$(command -v create-dmg)"
           CREATE_DMG="$(readlink -f "$CREATE_DMG")"
           sed -i -e 's/MAXIMUM_UNMOUNTING_ATTEMPTS=3/MAXIMUM_UNMOUNTING_ATTEMPTS=7/' "$CREATE_DMG"
-          create-dmg --icon "IPMRmt.app" 200 190 --hide-extension "IPMRmt.app" --window-size 800 400 --app-drop-link 600 185 ipmrmt-${{ env.VERSION }}-${{ matrix.job.arch }}.dmg ./flutter/build/macos/Build/Products/Release/IPMRmt.app
+          create-dmg --icon "RustDesk.app" 200 190 --hide-extension "RustDesk.app" --window-size 800 400 --app-drop-link 600 185 rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.dmg ./flutter/build/macos/Build/Products/Release/RustDesk.app
 
       - name: Upload unsigned macOS app
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: actions/upload-artifact@master
         with:
-          name: ipmrmt-unsigned-macos-${{ matrix.job.arch }}
-          path: ipmrmt-${{ env.VERSION }}-${{ matrix.job.arch }}.dmg # can not upload the directory directly or tar.gz, which destroy the link structure, causing the codesign failed
+          name: rustdesk-unsigned-macos-${{ matrix.job.arch }}
+          path: rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.dmg # can not upload the directory directly or tar.gz, which destroy the link structure, causing the codesign failed
 
       - name: Codesign app and create signed dmg
         if: env.MACOS_P12_BASE64 != null && env.UPLOAD_ARTIFACT == 'true'
@@ -864,18 +727,18 @@ jobs:
           # Unlock keychain
           security default-keychain -s rustdesk.keychain
           security unlock-keychain -p ${{ secrets.MACOS_P12_PASSWORD }} rustdesk.keychain
-          # start sign the ipmrmt.app and dmg
+          # start sign the rustdesk.app and dmg
           rm -rf *.dmg || true
-          codesign --force --options runtime -s ${{ secrets.MACOS_CODESIGN_IDENTITY }} --deep --strict ./flutter/build/macos/Build/Products/Release/IPMRmt.app -vvv
-          create-dmg --icon "IPMRmt.app" 200 190 --hide-extension "IPMRmt.app" --window-size 800 400 --app-drop-link 600 185 ipmrmt-${{ env.VERSION }}.dmg ./flutter/build/macos/Build/Products/Release/IPMRmt.app
-          codesign --force --options runtime -s ${{ secrets.MACOS_CODESIGN_IDENTITY }} --deep --strict ipmrmt-${{ env.VERSION }}.dmg -vvv
-          # notarize the ipmrmt-${{ env.VERSION }}.dmg
-          rcodesign notary-submit --api-key-path ${{ github.workspace }}/rustdesk.json  --staple ipmrmt-${{ env.VERSION }}.dmg
+          codesign --force --options runtime -s ${{ secrets.MACOS_CODESIGN_IDENTITY }} --deep --strict ./flutter/build/macos/Build/Products/Release/RustDesk.app -vvv
+          create-dmg --icon "RustDesk.app" 200 190 --hide-extension "RustDesk.app" --window-size 800 400 --app-drop-link 600 185 rustdesk-${{ env.VERSION }}.dmg ./flutter/build/macos/Build/Products/Release/RustDesk.app
+          codesign --force --options runtime -s ${{ secrets.MACOS_CODESIGN_IDENTITY }} --deep --strict rustdesk-${{ env.VERSION }}.dmg -vvv
+          # notarize the rustdesk-${{ env.VERSION }}.dmg
+          rcodesign notary-submit --api-key-path ${{ github.workspace }}/rustdesk.json  --staple rustdesk-${{ env.VERSION }}.dmg
 
       - name: Rename rustdesk
         if: env.UPLOAD_ARTIFACT == 'true'
         run: |
-          for name in ipmrmt*??.dmg; do
+          for name in rustdesk*??.dmg; do
               mv "$name" "${name%%.dmg}-${{ matrix.job.arch }}.dmg"
           done
 
@@ -886,7 +749,7 @@ jobs:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
-            ipmrmt*-${{ matrix.job.arch }}.dmg
+            rustdesk*-${{ matrix.job.arch }}.dmg
 
   publish_unsigned:
     needs:
@@ -915,14 +778,14 @@ jobs:
 
       - name: Combine unsigned app
         run: |
-          tar czf ipmrmt-${{ env.VERSION }}-unsigned.tar.gz *.dmg windows-x86_64
+          tar czf rustdesk-${{ env.VERSION }}-unsigned.tar.gz *.dmg windows-x86_64
 
       - name: Publish unsigned app
         uses: softprops/action-gh-release@v1
         with:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
-          files: ipmrmt-${{ env.VERSION }}-unsigned.tar.gz
+          files: rustdesk-${{ env.VERSION }}-unsigned.tar.gz
 
   build-rustdesk-android:
     needs: [generate-bridge]
@@ -1133,7 +996,7 @@ jobs:
               # build flutter
               pushd flutter
               flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm64 --split-per-abi
-              mv build/app/outputs/flutter-apk/app-arm64-v8a-${{ matrix.job.reltype }}.apk ../ipmrmt-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
+              mv build/app/outputs/flutter-apk/app-arm64-v8a-${{ matrix.job.reltype }}.apk ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
             ;;
             armv7-linux-androideabi)
               mkdir -p ./flutter/android/app/src/main/jniLibs/armeabi-v7a
@@ -1142,7 +1005,7 @@ jobs:
               # build flutter
               pushd flutter
               flutter build apk "--${{ matrix.job.reltype }}" --target-platform android-arm --split-per-abi
-              mv build/app/outputs/flutter-apk/app-armeabi-v7a-${{ matrix.job.reltype }}.apk ../ipmrmt-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
+              mv build/app/outputs/flutter-apk/app-armeabi-v7a-${{ matrix.job.reltype }}.apk ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk
             ;;
             x86_64-linux-android)
               mkdir -p ./flutter/android/app/src/main/jniLibs/x86_64
@@ -1165,7 +1028,7 @@ jobs:
           esac
           popd
           mkdir -p signed-apk; pushd signed-apk
-          mv ../ipmrmt-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk .
+          mv ../rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.apk .
 
       # https://github.com/r0adkll/sign-android-release/issues/84#issuecomment-1889636075
       - name: Setup sign tool version variable
@@ -1193,7 +1056,7 @@ jobs:
         if: env.ANDROID_SIGNING_KEY != null && env.UPLOAD_ARTIFACT == 'true'
         uses: actions/upload-artifact@master
         with:
-          name: ipmrmt-${{ env.VERSION }}-${{ matrix.job.arch }}.apk
+          name: rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.apk
           path: ${{steps.sign-rustdesk.outputs.signedReleaseFile}}
 
       - name: Publish signed apk package
@@ -1212,7 +1075,7 @@ jobs:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
-            signed-apk/ipmrmt-${{ env.VERSION }}-${{ matrix.job.arch }}.apk
+            signed-apk/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}.apk
 
   build-rustdesk-android-universal:
     needs: [build-rustdesk-android]
@@ -1946,8 +1809,8 @@ jobs:
         uses: actions/upload-artifact@master
         if: env.UPLOAD_ARTIFACT == 'true'
         with:
-          name: ipmrmt-${{ env.VERSION }}-${{ matrix.job.arch }}-sciter.deb
-          path: ipmrmt-${{ env.VERSION }}-${{ matrix.job.arch }}-sciter.deb
+          name: rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}-sciter.deb
+          path: rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}-sciter.deb
 
   build-appimage:
     name: Build appimage ${{ matrix.job.target }}
@@ -2042,12 +1905,12 @@ jobs:
       - name: Download Binary
         uses: actions/download-artifact@master
         with:
-          name: ipmrmt-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.deb
+          name: rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.deb
           path: .
 
       - name: Rename Binary
         run: |
-          mv ipmrmt-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.deb flatpak/ipmrmt.deb
+          mv rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.deb flatpak/rustdesk.deb
 
       - uses: rustdesk-org/run-on-arch-action@amd64-support
         name: Build rustdesk flatpak package for ${{ matrix.job.arch }}
@@ -2074,7 +1937,7 @@ jobs:
             pushd flatpak
             git clone https://github.com/flathub/shared-modules.git --depth=1
             flatpak-builder --user --install-deps-from=flathub -y --force-clean --repo=repo ./build ./rustdesk.json
-            flatpak build-bundle ./repo ipmrmt-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.flatpak com.rustdesk.RustDesk
+            flatpak build-bundle ./repo rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.flatpak com.rustdesk.RustDesk
 
       - name: Publish flatpak package
         uses: softprops/action-gh-release@v1
@@ -2082,7 +1945,7 @@ jobs:
           prerelease: true
           tag_name: ${{ env.TAG_NAME }}
           files: |
-            flatpak/ipmrmt-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.flatpak
+            flatpak/rustdesk-${{ env.VERSION }}-${{ matrix.job.arch }}${{ matrix.job.suffix }}.flatpak
 
   build-rustdesk-web:
     if: False
